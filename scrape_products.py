@@ -144,9 +144,23 @@ def main():
                     continue
                 model = str(raw_model).strip()
 
+                # Skip if already scraped in a previous run
+                if ws.cell(row=row, column=desc1_col).value or ws.cell(row=row, column=desc2_col).value:
+                    continue
+
                 try:
                     search_url = f"{BASE_URL}/search/?q={quote(model)}&_locale=ge"
-                    page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+                    try:
+                        page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+                    except Exception as nav_err:
+                        # Reset page if previous in-flight redirect interrupted navigation
+                        if "interrupted" in str(nav_err).lower():
+                            page.close()
+                            page = context.new_page()
+                            page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+                        else:
+                            raise nav_err
+
                     if not pass_cloudflare_challenge(page):
                         log.warning("[Row %d] Cloudflare challenge failed on search for %s", row, model)
                         continue
@@ -225,6 +239,12 @@ def main():
 
                 except Exception:
                     log.exception("[Row %d] Error scraping %s", row, model)
+                    # Reset page so an error state doesn't ruin subsequent rows
+                    try:
+                        page.close()
+                        page = context.new_page()
+                    except Exception:
+                        pass
 
         finally:
             wb.save(EXCEL_FILE)
