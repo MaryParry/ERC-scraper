@@ -1,0 +1,25 @@
+# Session state and auth tokens
+data/cf_state.json
+*.json
+!package*.json
+
+# Logs
+*.log
+data/*.log
+
+# Scraped assets and outputs
+data/*/
+!data/ERC_Stock.xlsx
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Environment and IDE
+.env
+.direnv/
+.vscode/
+.idea/
