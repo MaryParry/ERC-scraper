@@ -1,5 +1,6 @@
 # Session state and auth tokens
 data/cf_state.json
+data/orte_state.json
 *.json
 !package*.json
 
@@ -9,6 +10,9 @@ data/*.log
 
 # Scraped assets and outputs
 data/*/
+data/*.png
+.~lock.*
+data/.~lock.*
 !data/ERC_Stock.xlsx
 
 # Python cache
