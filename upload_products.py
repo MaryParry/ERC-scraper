@@ -293,6 +293,69 @@ def fill_and_upload_product(
     return False
 
 
+def ensure_authenticated(page: Page, context, wait_seconds: int = 60, force: bool = False) -> bool:
+    """Ensure the session is authenticated on orte.ge.
+    
+    If unauthenticated (or force=True), navigates to login and waits up to
+    wait_seconds for manual phone/SMS authentication.
+    """
+    if not force and os.path.exists(ORTE_STATE_FILE):
+        page.goto(NEW_PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+        try:
+            page.wait_for_selector("#name", timeout=4000)
+            log.info("Active session verified on orte.ge.")
+            return True
+        except Exception:
+            log.info("Saved session expired or invalid. Manual login required.")
+
+    log.info("Checking authentication at %s...", NEW_PRODUCT_URL)
+    page.goto(NEW_PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(1000)
+
+    if "/auth/login" not in page.url and page.locator("#name").count() > 0:
+        log.info("Already authenticated on orte.ge.")
+        return True
+
+    log.info("=" * 60)
+    log.info(">>> MANUAL AUTHENTICATION REQUIRED <<<")
+    log.info("Please enter your phone number and SMS code in the opened browser window.")
+    log.info("Waiting %d seconds for login to complete before starting upload...", wait_seconds)
+    log.info("=" * 60)
+
+    start_time = time.time()
+    last_logged = -1
+    while time.time() - start_time < wait_seconds:
+        elapsed = int(time.time() - start_time)
+        remaining = wait_seconds - elapsed
+        if remaining != last_logged and (remaining % 10 == 0 or remaining in (5, 4, 3, 2, 1)):
+            log.info("Waiting for login... (%d seconds remaining)", remaining)
+            last_logged = remaining
+
+        # Check if login completed
+        if "/seller/products" in page.url:
+            try:
+                if page.locator("#name").count() > 0:
+                    log.info("Login completed successfully!")
+                    break
+            except Exception:
+                pass
+
+        page.wait_for_timeout(1000)
+
+    if "/seller/products/new" not in page.url:
+        page.goto(NEW_PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+
+    try:
+        page.wait_for_selector("#name", timeout=10000)
+        os.makedirs(os.path.dirname(ORTE_STATE_FILE), exist_ok=True)
+        context.storage_state(path=ORTE_STATE_FILE)
+        log.info("Authenticated successfully! Session saved to %s", ORTE_STATE_FILE)
+        return True
+    except Exception:
+        log.error("Authentication timed out after %d seconds. Could not reach product form on %s.", wait_seconds, page.url)
+        return False
+
+
 def find_or_create_col(ws, header_name: str) -> int:
     for col in range(1, ws.max_column + 1):
         if ws.cell(row=1, column=col).value == header_name:
@@ -311,6 +374,8 @@ def main():
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
     parser.add_argument("--use-subcategory", action="store_true", help="Select Sub-category (Col D) instead of Category (Col C)")
     parser.add_argument("--screenshot", type=str, default="data/form_preview.png", help="Screenshot path for dry-run/test")
+    parser.add_argument("--login-wait", type=int, default=60, help="Seconds to wait for manual login when unauthenticated (default: 60)")
+    parser.add_argument("--force-login", action="store_true", help="Force waiting for manual login even if saved session state exists")
     args = parser.parse_args()
 
     if not args.row and not args.model and not args.batch:
@@ -332,6 +397,10 @@ def main():
         page = context.new_page()
 
         try:
+            if not ensure_authenticated(page, context, wait_seconds=args.login_wait, force=args.force_login):
+                log.error("Exiting because authentication was not completed.")
+                return
+
             for row in range(START_ROW, ws.max_row + 1):
                 raw_model = ws.cell(row=row, column=5).value
                 if not raw_model or not str(raw_model).strip():
